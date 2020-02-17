@@ -26,25 +26,35 @@ suppressMessages(library(tidyr))
 suppressMessages(library(magrittr))
 suppressMessages(library(ggplot2))
 suppressMessages(library(dplyr))
+suppressMessages(library(BSgenome.Hsapiens.UCSC.hg38))
 
-load(file="~/git-projects/essGenesCRISPR/data/ess.genes.rda")
+load(file="../data/ess.genes.rda")
+yusa.v3 <- read.table("../data/cleanr.tsv",header=T, stringsAsFactors = F)
+
+filter <- dplyr::filter
+select <- dplyr::select
+rename <- dplyr::rename
+arrange <- dplyr::arrange
 
 genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
-  dplyr::mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
-  dplyr::mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
-                bagel_essential = Gene %in% ess.genes$bagel_essential,
-                bagel_nonessential = Gene %in% ess.genes$bagel_nonessential)
+  mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
+  mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
+         bagel_essential = Gene %in% ess.genes$bagel_essential,
+         bagel_nonessential = Gene %in% ess.genes$bagel_nonessential)
 
 ```
 
 # Sanity checks on input genes
 
 ```{r}
-cat("Pan-cancer Sanger set:")
+cat("Pan-cancer Sanger set comparison:")
 kable(table(genes$PanCancer_essential,genes$pan_cancer))
 
-genes %>%
-  filter(PanCancer_essential == F & pan_cancer == T)
+cat("Pan Cancer essentials in Hart's Neutral gene list:")
+kable(
+  genes %>%
+    filter(PanCancer_essential == F & pan_cancer == T)
+)
 
 cat("Expected numbers of essential groups:")
 sum(genes$Early_essential) == params$early
@@ -55,36 +65,70 @@ sum(genes$Late_essential) == params$late
 
 # Build benchmarking library
 
+```{r,eval=F}
+yusa <- yusa.v3 %>%
+  filter(GENES %in% genes$Gene) %>%
+  # All guides are 19bp in the 'cleanr' file - base 20 is variable even though 21 and 22 are always GG. 
+  # Hence, must extract base 20 so guides can be correctly synthesised.
+  rowwise() %>%
+  mutate(sequence = ifelse(STRAND == "+", as.character(Hsapiens[[paste("chr",CHRM,sep="")]][STARTpos:ENDpos]),
+                           as.character(reverseComplement(Hsapiens[[paste("chr",CHRM,sep="")]][STARTpos:ENDpos])))) %>%
+  ungroup()
+```
+
 ```{r}
-toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFactors = F) %>%
-  dplyr::filter(GENE %in% genes$Gene) %>%
-  dplyr::rename(grna_id = GUIDE_ID, gene = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
-  dplyr::arrange(gene, grna_id) %>%
-  dplyr::select(grna_id, gene, sequence, target_exon)
-
-gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors = F) %>%
-  dplyr::filter(gene_id %in% genes$Gene) %>%
-  dplyr::rename(grna_id = UID, gene = gene_id, sequence = seq) %>%
-  dplyr::mutate(target_exon = NA) %>%
-  dplyr::arrange(gene, grna_id) %>%
-  dplyr::select(grna_id, gene, sequence, target_exon)
-
-gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsFactors = F) %>%
-  dplyr::filter(Gene.Symbol %in% genes$Gene) %>%
-  dplyr::mutate(target_exon = NA, num = 1:nrow(.),
-                grna_id = paste("gattinara.",num,sep="")) %>%
-  dplyr::rename(gene = Gene.Symbol, sequence = Barcode.Sequence) %>%
-  dplyr::arrange(gene, grna_id) %>%
-  dplyr::select(grna_id, gene, sequence, target_exon)
+yusa %<>%
+  mutate(library = "Yusa_v3", target_exon = NA, sequence = substr(sequence,1,20)) %>%
+  rename(grna_id = CODE, gene = GENES, strand = STRAND) %>%
+  arrange(gene, grna_id) %>%
+  select(library, grna_id, gene, strand, target_exon, sequence)
 
 brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFactors = F) %>%
-  dplyr::filter(Target.Gene.Symbol %in% genes$Gene) %>%
-  dplyr::rename(grna_id = UID, gene = Target.Gene.Symbol, sequence = sgRNA.Target.Sequence,
-                target_exon = Exon.Number) %>%
-  dplyr::arrange(gene, grna_id) %>%
-  dplyr::select(grna_id, gene, sequence, target_exon)
+  filter(Target.Gene.Symbol %in% genes$Gene) %>%
+  mutate(library = "Brunello", num = 1:nrow(.), grna_id = paste("gattinara.",num,sep=""),
+         Strand = ifelse(Strand == "sense","+","-")) %>%
+  rename(gene = Target.Gene.Symbol, sequence = sgRNA.Target.Sequence,
+         strand = Strand, target_exon = Exon.Number) %>%
+  arrange(gene, grna_id) %>%
+  select(library, grna_id, gene, strand, target_exon, sequence)
+
+toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFactors = F) %>%
+  filter(GENE %in% genes$Gene) %>%
+  rename(grna_id = GUIDE_ID, gene = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
+  mutate(library = "Toronto",target_exon = as.integer(gsub("^exon_(\\d+)$","\\1",target_exon))) %>%
+  rowwise() %>%
+  mutate(strand = tail(unlist(strsplit(grna_id,"_")),1)) %>%
+  ungroup() %>%
+  arrange(gene, grna_id) %>%
+  select(library, grna_id, gene, strand, target_exon, sequence)
+
+gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors = F) %>%
+  filter(gene_id %in% genes$Gene) %>%
+  rename(grna_id = UID, gene = gene_id, sequence = seq) %>%
+  mutate(library = "Gecko", target_exon = NA, strand = NA) %>%
+  arrange(gene, grna_id) %>%
+  select(library, grna_id, gene, strand, target_exon, sequence)
+
+gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsFactors = F) %>%
+  filter(Gene.Symbol %in% genes$Gene) %>%
+  mutate(library = "Gattinara", target_exon = NA, num = 1:nrow(.),
+         grna_id = paste("gattinara.",num,sep=""), target_exon = NA, strand = NA) %>%
+  rename(gene = Gene.Symbol, sequence = Barcode.Sequence) %>%
+  arrange(gene, grna_id) %>%
+  select(library, grna_id, gene, strand, target_exon, sequence)
 
 ```
 
+```{r}
+bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara) %>%
+  # Overlapping guides.
+  group_by(sequence) %>%
+  mutate(status = ifelse(n() == 1,"Unique",paste(unique(library),collapse=".")),
+         status = ifelse(grepl("\\.",status),status,"Unique")) %>%
+  ungroup() %>%
+  filter(!duplicated(sequence))
+
+
+```
 
 
