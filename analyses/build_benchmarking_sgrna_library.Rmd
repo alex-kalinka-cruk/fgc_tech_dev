@@ -11,6 +11,10 @@ output:
     theme: spacelab
     toc: true
     toc_float: true
+params:
+  early: !r 86
+  mid: !r 77
+  late: !r 87
 ---
 
 # Setup
@@ -26,10 +30,10 @@ suppressMessages(library(dplyr))
 load(file="~/git-projects/essGenesCRISPR/data/ess.genes.rda")
 
 genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
-  mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
-  mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
-         bagel_essential = Gene %in% ess.genes$bagel_essential,
-         bagel_nonessential = Gene %in% ess.genes$bagel_nonessential)
+  dplyr::mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
+  dplyr::mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
+                bagel_essential = Gene %in% ess.genes$bagel_essential,
+                bagel_nonessential = Gene %in% ess.genes$bagel_nonessential)
 
 ```
 
@@ -42,16 +46,43 @@ kable(table(genes$PanCancer_essential,genes$pan_cancer))
 genes %>%
   filter(PanCancer_essential == F & pan_cancer == T)
 
-kable(table(genes$Early_essential))
-kable(table(genes$Mid_essential))
-kable(table(genes$Late_essential))
+cat("Expected numbers of essential groups:")
+sum(genes$Early_essential) == params$early
+sum(genes$Mid_essential) == params$mid
+sum(genes$Late_essential) == params$late
 
 ```
 
 # Build benchmarking library
 
 ```{r}
+toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFactors = F) %>%
+  dplyr::filter(GENE %in% genes$Gene) %>%
+  dplyr::rename(grna_id = GUIDE_ID, gene = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
+  dplyr::arrange(gene, grna_id) %>%
+  dplyr::select(grna_id, gene, sequence, target_exon)
 
+gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors = F) %>%
+  dplyr::filter(gene_id %in% genes$Gene) %>%
+  dplyr::rename(grna_id = UID, gene = gene_id, sequence = seq) %>%
+  dplyr::mutate(target_exon = NA) %>%
+  dplyr::arrange(gene, grna_id) %>%
+  dplyr::select(grna_id, gene, sequence, target_exon)
+
+gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsFactors = F) %>%
+  dplyr::filter(Gene.Symbol %in% genes$Gene) %>%
+  dplyr::mutate(target_exon = NA, num = 1:nrow(.),
+                grna_id = paste("gattinara.",num,sep="")) %>%
+  dplyr::rename(gene = Gene.Symbol, sequence = Barcode.Sequence) %>%
+  dplyr::arrange(gene, grna_id) %>%
+  dplyr::select(grna_id, gene, sequence, target_exon)
+
+brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFactors = F) %>%
+  dplyr::filter(Target.Gene.Symbol %in% genes$Gene) %>%
+  dplyr::rename(grna_id = UID, gene = Target.Gene.Symbol, sequence = sgRNA.Target.Sequence,
+                target_exon = Exon.Number) %>%
+  dplyr::arrange(gene, grna_id) %>%
+  dplyr::select(grna_id, gene, sequence, target_exon)
 
 ```
 
