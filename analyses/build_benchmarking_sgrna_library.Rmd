@@ -92,8 +92,11 @@ kable(
 )
 
 cat("Expected numbers of essential groups:")
+cat("Early:")
 sum(genes$Early_essential) == params$early
+cat("Mid:")
 sum(genes$Mid_essential) == params$mid
+cat("Late:")
 sum(genes$Late_essential) == params$late
 
 ```
@@ -101,6 +104,8 @@ sum(genes$Late_essential) == params$late
 # Benchmarking library
 
 ## Build
+
+### Standard
 
 ```{r}
 # Libraries.
@@ -163,6 +168,8 @@ gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsF
 
 ```
 
+### Horizon
+
 ```{r}
 # Horizon gRNA library must be kept locally.
 horizon <- read.csv("~/data/az_cruk/horizon_grnas.csv", stringsAsFactors = F) %>%
@@ -176,6 +183,29 @@ horizon <- read.csv("~/data/az_cruk/horizon_grnas.csv", stringsAsFactors = F) %>
   select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
 
 ```
+
+### Croatan
+
+```{r}
+croatan <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene.txt",
+                      header=F, stringsAsFactors = F) %>%
+  select(-V3,-V4,-V5) %>%
+  rowwise() %>%
+  mutate(gRNA_sequence.1 = unlist(strsplit(V2,"__"))[2],
+         gRNA_sequence.2 = unlist(strsplit(V2,"__"))[6]) %>%
+  ungroup() %>%
+  select(-V2) %>%
+  gather(key = "guide_number", value = "context_sequence", -V1) %>%
+  rename(gene = V1) %>%
+  arrange(gene, guide_number, context_sequence) %>%
+  rowwise() %>%
+  mutate(sequence = substr(context_sequence,1,24), PAM = substr(context_sequence,25,27)) %>%
+  ungroup()
+
+
+```
+
+### Final
 
 ```{r}
 bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon) %>%
