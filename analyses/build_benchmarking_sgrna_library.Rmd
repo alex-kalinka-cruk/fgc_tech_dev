@@ -28,11 +28,16 @@ suppressMessages(library(ggplot2))
 suppressMessages(library(dplyr))
 # Try to convert all genes into standard gene symbols.
 suppressMessages(library(org.Hs.eg.db))
+suppressMessages(library(biomaRt))
+suppressMessages(library(Rbowtie2))
+
 
 filter <- dplyr::filter
 select <- dplyr::select
 rename <- dplyr::rename
 arrange <- dplyr::arrange
+
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
 
 
 get_standard_symbols <- function(gene_names){
@@ -53,8 +58,8 @@ add_syms <- function(data, gene_col){
     group_by(!!sym(gene_col)) %>%
     summarise(num = n()) %>%
     ungroup()
-  syms <- get_standard_symbols(unique(data[,gene_col]))
-  if(length(syms) != length(unique(data[,gene_col])))
+  syms <- get_standard_symbols(unique(unlist(data[,gene_col])))
+  if(length(syms) != length(unique(unlist(data[,gene_col]))))
     stop("unequal number of symbols returned")
   data %<>%
     mutate(gene_symbol = rep(syms, reps$num))
@@ -62,6 +67,38 @@ add_syms <- function(data, gene_col){
 }
 
 
+# Functions to:
+# 1. Get missing gene coding regions.
+# 2. Build a FASTA file of the missing genes.
+# 3. Build into a bowtie reference.
+# 4. Short-read alignment of the gRNAs.
+build_missing_gene_bowtie_ref <- function(genes, fasta_out, bowtie_ref_dir){
+  # 1. Download coding regions from biomart.
+  seqs <- getBM(attributes = c("hgnc_symbol","coding"), filters="hgnc_symbol", values=genes, mart=ensembl) %>%
+    filter(!is.na(coding)) %>%
+    rowwise() %>%
+    mutate(len = nchar(coding)) %>%
+    ungroup() %>%
+    # 2. Select longest seq for each gene.
+    group_by(hgnc_symbol) %>%
+    filter(len == max(len)) %>%
+    filter(n()==1) %>%
+    ungroup()
+  seq_inp <- seqs$coding
+  names(seq_inp) <- seqs$hgnc_symbol
+  seqs <- DNAStringSet(seq_inp)
+  # 3. BUild FASTA.
+  writeXStringSet(seqs, fasta_out, format = "fasta")
+  # 4. Make bowtie reference.
+  bowtie2_build(fasta_out, bt2Index=bowtie_ref_dir)
+  return(seqs)
+}
+
+
+```
+
+
+```{r}
 load(file="../data/ess.genes.rda")
 
 genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
@@ -187,8 +224,9 @@ horizon <- read.csv("~/data/az_cruk/horizon_grnas.csv", stringsAsFactors = F) %>
 ### Croatan
 
 ```{r}
-croatan <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene.txt",
-                      header=F, stringsAsFactors = F) %>%
+croatan.all <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene.txt",
+                      header=F, stringsAsFactors = F)
+croatan <- croatan.all %>%
   select(-V3,-V4,-V5) %>%
   rowwise() %>%
   mutate(gRNA_sequence.1 = unlist(strsplit(V2,"__"))[2],
@@ -199,9 +237,18 @@ croatan <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene
   rename(gene = V1) %>%
   arrange(gene, guide_number, context_sequence) %>%
   rowwise() %>%
-  mutate(sequence = substr(context_sequence,1,24), PAM = substr(context_sequence,25,27)) %>%
-  ungroup()
-
+  mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27),) %>%
+  ungroup() %>%
+  arrange(gene) %>%
+  add_syms(gene_col = "gene") %>%
+  right_join(genes, by = "gene_symbol") %>%
+  #filter(gene_symbol %in% genes$gene_symbol) %>%
+  mutate(library = "Croatan", target_exon = NA, strand = NA,
+         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)],
+         num = 1:nrow(.), grna_id = paste("Croatan.",num,sep="")) %>%
+  rename(gene_name.original = gene) %>%
+  arrange(gene_symbol, grna_id) %>%
+  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
 
 ```
 
