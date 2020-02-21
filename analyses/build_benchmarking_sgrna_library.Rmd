@@ -37,11 +37,21 @@ select <- dplyr::select
 rename <- dplyr::rename
 arrange <- dplyr::arrange
 
+# hg38.
 ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
 
+# hg37 (for croatan).
+ensembl.hg37 <- useMart("ensembl",dataset="hsapiens_gene_ensembl",
+                        host="http://feb2014.archive.ensembl.org")
 
-get_standard_symbols <- function(gene_names){
-  syms <- AnnotationDbi::select(org.Hs.eg.db, gene_names, "SYMBOL", "ALIAS") %>%
+get_standard_symbols <- function(gene_names, type = "sym"){
+  if(type=="sym"){
+    syms <- AnnotationDbi::select(org.Hs.eg.db, gene_names, "SYMBOL", "ALIAS")
+  }else{
+    syms <- AnnotationDbi::select(org.Hs.eg.db, gene_names, "ENSEMBL", "ALIAS") %>%
+      rename(SYMBOL = ENSEMBL)
+  }
+  syms %<>%
     rowwise() %>%
     mutate(SYMBOL = ifelse(is.na(SYMBOL),ALIAS,SYMBOL)) %>%
     ungroup() %>%
@@ -72,11 +82,17 @@ add_syms <- function(data, gene_col){
 # 2. Build a FASTA file of the missing genes.
 # 3. Build into a bowtie reference.
 # 4. Short-read alignment of the gRNAs.
-build_missing_gene_bowtie_ref <- function(genes, fasta_out, bowtie_ref_dir){
+build_missing_gene_bowtie_ref <- function(genes, fasta_out, bowtie_ref_dir, hsapiens_mart){
+  # Convert to Ensembl IDs.
+  ens <- get_standard_symbols(genes, type = "ens")
   # 1. Download coding regions from biomart.
-  seqs <- getBM(attributes = c("hgnc_symbol","coding"), filters="hgnc_symbol", values=genes, mart=ensembl) %>%
+  seqs <- getBM(attributes = c("hgnc_symbol","coding"), 
+                filters="hgnc_symbol", values=genes, mart=hsapiens_mart) %>%
+    rbind(getBM(attributes = c("hgnc_symbol","coding"), 
+                filters="ensembl_gene_id", values=ens[grepl("^ENS",ens)], mart=hsapiens_mart)) %>%
     filter(!is.na(coding)) %>%
     rowwise() %>%
+    filter(coding != "Sequence unavailable") %>%
     mutate(len = nchar(coding)) %>%
     ungroup() %>%
     # 2. Select longest seq for each gene.
@@ -90,10 +106,26 @@ build_missing_gene_bowtie_ref <- function(genes, fasta_out, bowtie_ref_dir){
   # 3. BUild FASTA.
   writeXStringSet(seqs, fasta_out, format = "fasta")
   # 4. Make bowtie reference.
-  bowtie2_build(fasta_out, bt2Index=bowtie_ref_dir)
+  bowtie2_build(fasta_out, bt2Index=bowtie_ref_dir, overwrite = T)
   return(seqs)
 }
 
+
+bowtie2_aln <- function(seqs, ref_base, fasta_out, sam_out){
+  # Write out seqs as FASTA.
+  writeXStringSet(seqs, fasta_out, format = "fasta")
+  # Run bowtie2.
+  bwt_cmd <- paste("bowtie2 -x ",ref_base," -U ",fasta_out," -S ",sam_out," -f --no-unal",sep="")
+  system(bwt_cmd, wait = T)
+}
+
+read_sam <- function(sam_out){
+  # Read and process alignments.
+  aln <- read.delim(sam_out, header=F, comment.char = "@", sep="\t") %>%
+    select(V3, V6, V10) %>%
+    filter(V6 == "20M" & !duplicated(V10))
+  return(aln)
+}
 
 ```
 
@@ -242,13 +274,16 @@ croatan <- croatan.all %>%
   arrange(gene) %>%
   add_syms(gene_col = "gene") %>%
   right_join(genes, by = "gene_symbol") %>%
-  #filter(gene_symbol %in% genes$gene_symbol) %>%
   mutate(library = "Croatan", target_exon = NA, strand = NA,
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)],
          num = 1:nrow(.), grna_id = paste("Croatan.",num,sep="")) %>%
   rename(gene_name.original = gene) %>%
   arrange(gene_symbol, grna_id) %>%
   select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+
+missing.genes <- croatan$gene_symbol[is.na(croatan$sequence)]
+missing_gene.seqs <- build_missing_gene_bowtie_ref(missing.genes, "missing_croatan.fasta",
+                                                   "croatan", ensembl.hg37)
 
 ```
 
