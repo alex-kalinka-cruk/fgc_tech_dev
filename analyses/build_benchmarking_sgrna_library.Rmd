@@ -29,6 +29,7 @@ suppressMessages(library(dplyr))
 # Try to convert all genes into standard gene symbols.
 suppressMessages(library(org.Hs.eg.db))
 suppressMessages(library(biomaRt))
+suppressMessages(library(Biostrings))
 suppressMessages(library(Rbowtie2))
 
 
@@ -121,9 +122,14 @@ bowtie2_aln <- function(seqs, ref_base, fasta_out, sam_out){
 
 read_sam <- function(sam_out){
   # Read and process alignments.
-  aln <- read.delim(sam_out, header=F, comment.char = "@", sep="\t") %>%
-    select(V3, V6, V10) %>%
-    filter(V6 == "20M" & !duplicated(V10))
+  aln <- read.delim(sam_out, header=F, comment.char = "@", sep="\t", stringsAsFactors = F) %>%
+    select(V2, V3, V6, V10) %>%
+    filter(V6 == "20M" & !duplicated(V10)) %>%
+    rowwise() %>%
+    # reverseComplement for reverse strand mappings:
+    # (use simple equality for bitwise flag since it only takes 2 values here).
+    mutate(V10 = ifelse(V2 == 16,as.character(reverseComplement(DNAString(V10))),V10)) %>%
+    ungroup()
   return(aln)
 }
 
@@ -181,18 +187,19 @@ sum(genes$Late_essential) == params$late
 yusa <- yusa.v3 %>%
   filter(!grepl("Control",gRNA_ID)) %>%
   arrange(Gene,gRNA_ID) %>%
-  add_syms(gene_col = "Gene") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+  rename(gene = Gene) %>%
+  add_syms(gene_col = "gene") %>%
+  right_join(genes, by = "gene_symbol") %>%
   mutate(library = "Yusa_v3", target_exon = NA, 
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  rename(grna_id = gRNA_ID, gene_name.original = Gene, strand = STRAND, sequence = Guide_sequence) %>%
+  rename(grna_id = gRNA_ID, gene_name.original = gene, strand = STRAND, sequence = Guide_sequence) %>%
   arrange(gene_symbol, grna_id) %>%
   select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
 
 brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFactors = F) %>%
   arrange(Target.Gene.Symbol) %>%
   add_syms(gene_col = "Target.Gene.Symbol") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+  right_join(genes, by = "gene_symbol") %>%
   mutate(library = "Brunello", num = 1:nrow(.), grna_id = paste("gattinara.",num,sep=""),
          Strand = ifelse(Strand == "sense","+","-"),
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
@@ -204,7 +211,7 @@ brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFac
 toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFactors = F) %>%
   arrange(GENE) %>%
   add_syms(gene_col = "GENE") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+  right_join(genes, by = "gene_symbol") %>%
   rename(grna_id = GUIDE_ID, gene_name.original = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
   mutate(library = "Toronto",target_exon = as.integer(gsub("^exon_(\\d+)$","\\1",target_exon)),
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
@@ -217,7 +224,7 @@ toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFacto
 gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors = F) %>%
   arrange(gene_id) %>%
   add_syms(gene_col = "gene_id") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+  right_join(genes, by = "gene_symbol") %>%
   rename(grna_id = UID, gene_name.original = gene_id, sequence = seq) %>%
   mutate(library = "Gecko", target_exon = NA, strand = NA,
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
@@ -227,7 +234,7 @@ gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors =
 gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsFactors = F) %>%
   arrange(Gene.Symbol) %>%
   add_syms(gene_col = "Gene.Symbol") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+  right_join(genes, by = "gene_symbol") %>%
   mutate(library = "Gattinara", target_exon = NA, num = 1:nrow(.),
          grna_id = paste("gattinara.",num,sep=""), target_exon = NA, strand = NA,
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
@@ -240,11 +247,20 @@ gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsF
 ### Horizon
 
 ```{r}
+read_horizon <- function(file){
+  ret <- read.csv(file, stringsAsFactors = F) %>%
+    arrange(GeneSymbol) %>%
+    add_syms(gene_col = "GeneSymbol")
+  return(ret)
+}
+
+horizon <- rbind(read_horizon("~/data/az_cruk/GC-004650-E2 Edit-R crRNA POOL Human Drug Targets Lot 17162.csv"),
+                 read_horizon("~/data/az_cruk/GC-004675-E2 Edit-R crRNA POOL Human Druggable Subsets Lot 17163.csv"),
+                 read_horizon("~/data/az_cruk/GC-006500-E2 Edit-R crRNA POOL Human Genome  Lot 17155.csv")) %>%
+  right_join(genes, by = "gene_symbol")
+
 # Horizon gRNA library must be kept locally.
-horizon <- read.csv("~/data/az_cruk/horizon_grnas.csv", stringsAsFactors = F) %>%
-  arrange(GeneSymbol) %>%
-  add_syms(gene_col = "GeneSymbol") %>%
-  filter(gene_symbol %in% genes$gene_symbol) %>%
+horizon %<>%
   mutate(library = "Horizon", target_exon = NA, strand = substr(GenomicLocation,6,6),
          gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
   rename(gene_name.original = GeneSymbol, grna_id = CatalogNumber, sequence = TargetSequence) %>%
@@ -269,7 +285,7 @@ croatan <- croatan.all %>%
   rename(gene = V1) %>%
   arrange(gene, guide_number, context_sequence) %>%
   rowwise() %>%
-  mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27),) %>%
+  mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27)) %>%
   ungroup() %>%
   arrange(gene) %>%
   add_syms(gene_col = "gene") %>%
@@ -281,9 +297,31 @@ croatan <- croatan.all %>%
   arrange(gene_symbol, grna_id) %>%
   select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
 
+```
+
+```{r}
+# Handle the missing genes.
 missing.genes <- croatan$gene_symbol[is.na(croatan$sequence)]
-missing_gene.seqs <- build_missing_gene_bowtie_ref(missing.genes, "missing_croatan.fasta",
-                                                   "croatan", ensembl.hg37)
+
+# Unspliced gene (ens99) and exon (ens75) narrows down the number of missing genes.
+miss_gene.grnas <- read_sam("../data/ens99-croatan-missing-genes-unspl-gene.sam") %>%
+  rbind(read_sam("../data/ens75-croatan-missing-genes-exon.sam")) %>%
+  filter(!duplicated(V10)) %>%
+  rename(sam_flag = V2, gene = V3, bowtie2_matches = V6, sequence = V10) %>%
+  arrange(gene) %>%
+  rowwise() %>%
+  mutate(in_prior_set = sequence %in% croatan$sequence) %>%
+  ungroup() %>%
+  mutate(other_gene = croatan$gene_symbol.fgc[match(sequence,croatan$sequence)],
+         gene_symbol.fgc = genes$gene[match(gene,genes$gene_symbol)])
+
+missing.genes.final <- genes$Gene[match(setdiff(missing.genes,miss_gene.grnas$gene),genes$gene_symbol)]
+
+cat("Multi-mapping gRNAs:")
+as.data.frame(table(miss_gene.grnas$gene, miss_gene.grnas$other_gene)) %>%
+  filter(Freq>0)
+
+# Update croatan set.
 
 ```
 
