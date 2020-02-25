@@ -11,10 +11,6 @@ output:
     theme: spacelab
     toc: true
     toc_float: true
-params:
-  early: !r 86
-  mid: !r 77
-  late: !r 87
 ---
 
 # Setup
@@ -27,7 +23,6 @@ suppressMessages(library(tidyr))
 suppressMessages(library(magrittr))
 suppressMessages(library(ggplot2))
 suppressMessages(library(dplyr))
-# Try to convert all genes into standard gene symbols.
 suppressMessages(library(org.Hs.eg.db))
 suppressMessages(library(biomaRt))
 suppressMessages(library(Biostrings))
@@ -42,11 +37,10 @@ context_dep_genes <- c("TP53","MDM2","MDM4","PPM1D","KRAS","WRN","PIK3CA",
                        "PARP1","PARP2","BCL2L1","MAP2K1","MAPK1")
 
 # hg38.
-ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+#ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
 
 # hg37 (for croatan).
-ensembl.hg37 <- useMart("ensembl",dataset="hsapiens_gene_ensembl",
-                        host="http://feb2014.archive.ensembl.org")
+#ensembl.hg37 <- useMart("ensembl",dataset="hsapiens_gene_ensembl", host="http://feb2014.archive.ensembl.org")
 
 get_standard_symbols <- function(gene_names, type = "sym"){
   if(type=="sym"){
@@ -138,10 +132,20 @@ read_sam <- function(sam_out){
 
 ```
 
+# Approach
+
+1. Find gene symbols that are common to all libraries.
+2. Pick all of David Walter's genes that are common across all the libraries.
+3. Top up essentials to make 250 in total using Sanger pan-cancer genes.
+4. Top up non-essentials to make 500 in total using Bagel non-essentials.
+5. Add 12 context-dependent genes.
+6. Add 100 control guides from Yusa v3.
+
 # Input genes
 
 ```{r}
 load(file="../data/ess.genes.rda")
+ess.time <- read.csv("../data/essential_early_late.csv", stringsAsFactors = F)
 
 genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
   mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
@@ -157,8 +161,10 @@ genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
     mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
            bagel_essential = Gene %in% ess.genes$bagel_essential,
            bagel_nonessential = Gene %in% ess.genes$bagel_nonessential,
-           context_dependent = Gene %in% context_dep_genes)
-
+           context_dependent = Gene %in% context_dep_genes,
+           Early_essential = Gene %in% ess.time$gene[ess.time$essential_type=="Early"],
+           Mid_essential = Gene %in% ess.time$gene[ess.time$essential_type=="Mid"],
+           Late_essential = Gene %in% ess.time$gene[ess.time$essential_type=="Late"])
 
 load(file="../data/ess.genes.rda")
 yusa.v3 <- read.csv("../data/CRISPR_libraries/yusa_v3-suppl-table-S3.csv", stringsAsFactors = F) %>%
@@ -171,6 +177,7 @@ read_horizon <- function(file){
   return(ret)
 }
 
+# Horizon gRNA libraries must be kept locally.
 horizon <- rbind(read_horizon("~/data/az_cruk/GC-004650-E2 Edit-R crRNA POOL Human Drug Targets Lot 17162.csv"),
                  read_horizon("~/data/az_cruk/GC-004675-E2 Edit-R crRNA POOL Human Druggable Subsets Lot 17163.csv"),
                  read_horizon("~/data/az_cruk/GC-006500-E2 Edit-R crRNA POOL Human Genome  Lot 17155.csv"))
@@ -243,8 +250,8 @@ genes %<>%
 ## Sanity checks on input genes
 
 ```{r}
-cat("Pan-cancer Sanger set comparison:")
-kable(table(genes$PanCancer_essential,genes$pan_cancer))
+cat("Total number of genes:")
+length(unique(genes$Gene))
 
 cat("Number of Essential genes:")
 sum(genes$Essential)
@@ -258,16 +265,20 @@ sum(genes$Mid_essential)
 cat("Late essential:")
 sum(genes$Late_essential)
 
-cat("Number of Non-essential genes (Hart neutral + bagel non-essential):")
+cat("Number of Non-essential genes (Hart Neutral + Bagel non-essential):")
 length(setdiff(union(genes$Gene[genes$Neutral_Hart], genes$Gene[genes$bagel_nonessential]),NA))
+
+cat("Number of context-dependent genes:")
+sum(genes$context_dependent)
+
+cat("Pan-cancer sanity check (all counts expected on the diagonal):")
+kable(table(genes$PanCancer_essential,genes$pan_cancer))
 
 ```
 
 # Benchmarking library
 
 ## Build
-
-### Standard
 
 ```{r}
 # Libraries.
@@ -277,105 +288,69 @@ yusa <- yusa.v3 %>%
   filter(Gene %in% genes$Gene) %>%
   mutate(library = "Yusa_v3", target_exon = NA) %>%
   rename(grna_id = gRNA_ID, gene = Gene, strand = STRAND, sequence = Guide_sequence) %>%
-  arrange(gene_symbol, grna_id) %>%
+  arrange(gene, grna_id) %>%
   select(library, gene, grna_id, strand, target_exon, sequence)
 
 brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFactors = F) %>%
   arrange(Target.Gene.Symbol) %>%
-  add_syms(gene_col = "Target.Gene.Symbol") %>%
-  right_join(genes, by = "gene_symbol") %>%
-  mutate(library = "Brunello", num = 1:nrow(.), grna_id = paste("gattinara.",num,sep=""),
-         Strand = ifelse(Strand == "sense","+","-"),
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  rename(gene_name.original = Target.Gene.Symbol, sequence = sgRNA.Target.Sequence,
-         strand = Strand, target_exon = Exon.Number) %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  filter(Target.Gene.Symbol %in% genes$Gene) %>%
+  mutate(library = "Brunello", num = 1:nrow(.), grna_id = paste("brunello.",num,sep=""),
+         Strand = ifelse(Strand == "sense","+","-")) %>%
+  rename(gene = Target.Gene.Symbol,
+         sequence = sgRNA.Target.Sequence, strand = Strand, target_exon = Exon.Number) %>%
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
 toronto <- read.csv("../data/CRISPR_libraries/toronto_grnas.csv", stringsAsFactors = F) %>%
   arrange(GENE) %>%
-  add_syms(gene_col = "GENE") %>%
-  right_join(genes, by = "gene_symbol") %>%
-  rename(grna_id = GUIDE_ID, gene_name.original = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
-  mutate(library = "Toronto",target_exon = as.integer(gsub("^exon_(\\d+)$","\\1",target_exon)),
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
+  filter(GENE %in% genes$Gene) %>%
+  rename(grna_id = GUIDE_ID, gene = GENE, sequence = SEQUENCE, target_exon = TARGET.EXON) %>%
+  mutate(library = "Toronto",target_exon = as.integer(gsub("^exon_(\\d+)$","\\1",target_exon))) %>%
   rowwise() %>%
   mutate(strand = tail(unlist(strsplit(grna_id,"_")),1)) %>%
   ungroup() %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
 gecko <- read.csv("../data/CRISPR_libraries/gecko_grnas.csv", stringsAsFactors = F) %>%
   arrange(gene_id) %>%
-  add_syms(gene_col = "gene_id") %>%
-  right_join(genes, by = "gene_symbol") %>%
-  rename(grna_id = UID, gene_name.original = gene_id, sequence = seq) %>%
-  mutate(library = "Gecko", target_exon = NA, strand = NA,
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  filter(gene_id %in% genes$Gene) %>%
+  rename(grna_id = UID, gene = gene_id, sequence = seq) %>%
+  mutate(library = "Gecko", target_exon = NA, strand = NA) %>%
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
 gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsFactors = F) %>%
   arrange(Gene.Symbol) %>%
-  add_syms(gene_col = "Gene.Symbol") %>%
-  right_join(genes, by = "gene_symbol") %>%
+  filter(Gene.Symbol %in% genes$Gene) %>%
   mutate(library = "Gattinara", target_exon = NA, num = 1:nrow(.),
-         grna_id = paste("gattinara.",num,sep=""), target_exon = NA, strand = NA,
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  rename(gene_name.original = Gene.Symbol, sequence = Barcode.Sequence) %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+         grna_id = paste("gattinara.",num,sep=""), target_exon = NA, strand = NA) %>%
+  rename(gene = Gene.Symbol, sequence = Barcode.Sequence) %>%
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
-```
-
-### Horizon
-
-```{r}
-# Horizon gRNA library must be kept locally.
 horizon %<>%
-  mutate(library = "Horizon", target_exon = NA, strand = substr(GenomicLocation,6,6),
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  rename(gene_name.original = GeneSymbol, grna_id = CatalogNumber, sequence = TargetSequence) %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  arrange(GeneSymbol) %>%
+  filter(GeneSymbol %in% genes$Gene) %>%
+  mutate(library = "Horizon", target_exon = NA, strand = substr(GenomicLocation,6,6)) %>%
+  rename(gene = GeneSymbol, grna_id = CatalogNumber, sequence = TargetSequence) %>%
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
-```
-
-### Croatan
-
-```{r}
-croatan.all <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene.txt",
-                      header=F, stringsAsFactors = F)
-croatan <- croatan.all %>%
-  select(-V3,-V4,-V5) %>%
-  rowwise() %>%
-  mutate(gRNA_sequence.1 = unlist(strsplit(V2,"__"))[2],
-         gRNA_sequence.2 = unlist(strsplit(V2,"__"))[6]) %>%
-  ungroup() %>%
-  select(-V2) %>%
-  gather(key = "guide_number", value = "context_sequence", -V1) %>%
-  rename(gene = V1) %>%
-  arrange(gene, guide_number, context_sequence) %>%
-  rowwise() %>%
-  mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27)) %>%
-  ungroup() %>%
-  arrange(gene) %>%
-  add_syms(gene_col = "gene") %>%
-  right_join(genes, by = "gene_symbol") %>%
+croatan %<>%
+  filter(gene %in% genes$Gene) %>%
   mutate(library = "Croatan", target_exon = NA, strand = NA,
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)],
          num = 1:nrow(.), grna_id = paste("Croatan.",num,sep="")) %>%
-  rename(gene_name.original = gene) %>%
-  arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  arrange(gene, grna_id) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
 ```
 
 
-### Final
+## Final
 
 ```{r}
-bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon) %>%
+bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon, croatan) %>%
   # Overlapping guides.
   # Must group by 19bp guides so we can include Yusa.
   rowwise() %>%
@@ -384,27 +359,57 @@ bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon) %>%
   group_by(seq_19) %>%
   mutate(library = ifelse(n() == 1, library, paste(unique(library),collapse="."))) %>%
   ungroup() %>%
-  filter(!duplicated(sequence))
+  filter(!duplicated(sequence)) %>%
+  select(-seq_19)
 
 ```
 
 # Library stats
 
-## Gene coverage
-
 ```{r}
-# Summarised by library.
-bm_library %>%
-  
+cat("Total number of genes:")
+length(unique(bm_library$gene))
 
-# Total breakdown.
-bm_library %>%
+cat("All genes in original set:")
+all(unique(bm_library$gene) %in% genes$Gene)
+
+cat("Total genes per library:")
+kable(t(
+  bm_library %>%
+  summarise(Num_genes.Yusa_v3 = length(unique(gene[grepl("Yusa_v3",library)])),
+            Num_genes.brunello = length(unique(gene[grepl("Brunello",library)])),
+            Num_genes.toronto = length(unique(gene[grepl("Toronto",library)])),
+            Num_genes.gecko = length(unique(gene[grepl("Gecko",library)])),
+            Num_genes.gattinara = length(unique(gene[grepl("Gattinara",library)])),
+            Num_genes.horizon = length(unique(gene[grepl("Horizon",library)])),
+            Num_genes.Croatan = length(unique(gene[grepl("Croatan",library)])))
+))
+
+
+cat("Full overlapping library breakdown:")
+kable(bm_library %>%
   group_by(library) %>%
-  summarise(number_genes = length(unique(gene_symbol.fgc))) %>%
+  summarise(Num_genes = length(unique(gene))) %>%
   ungroup() %>%
-  arrange(desc(number_genes)) %>%
-  kable()
+  arrange(desc(Num_genes))
+)
+
+bm_lib.hmap <- bm_library %>%
+  select(library) %>%
+  
 
 ```
 
+# Add 100 Control guides from Yusa v3
+
+```{r}
+
+
+```
+
+# Save
+
+```{r}
+
+```
 
