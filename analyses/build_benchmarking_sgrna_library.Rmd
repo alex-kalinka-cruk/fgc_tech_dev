@@ -173,8 +173,7 @@ yusa.v3 <- read.csv("../data/CRISPR_libraries/yusa_v3-suppl-table-S3.csv", strin
 
 read_horizon <- function(file){
   ret <- read.csv(file, stringsAsFactors = F) %>%
-    arrange(GeneSymbol) %>%
-    add_syms(gene_col = "GeneSymbol")
+    arrange(GeneSymbol)
   return(ret)
 }
 
@@ -387,10 +386,21 @@ count_pairwise_lib_grnas <- function(data){
 
 # Percentage of gRNAs shared across libraries.
 pct_shared_grnas <- function(data){
-  ret <- data %>%
-    group_by(Library_1) %>%
-    mutate(gRNA_percent = 100*gRNA_count/sum(gRNA_count)) %>%
-    ungroup()
+  data %<>%
+    mutate(Library_pair = paste(Library_1,Library_2,sep="."))
+  libs <- unique(data$Library_1)
+  ret <- NULL
+  for(lib in libs){
+    td <- data %>%
+      filter(grepl(lib,Library_pair)) %>%
+      mutate(Lib = lib, gRNA_percent = 100*gRNA_count/sum(gRNA_count)) %>%
+      rowwise() %>%
+      mutate(Library = ifelse(Library_pair!=paste(lib,lib,sep="."),
+                          setdiff(unlist(strsplit(Library_pair,"\\.")),unique(Lib)),
+                          lib)) %>%
+      ungroup()
+    ret <- rbind(ret, td)
+  }
   return(ret)
 }
 ```
@@ -414,29 +424,21 @@ kable(t(
             Num_genes.Croatan = length(unique(gene[grepl("Croatan",library)])))
 ))
 
-
-cat("Full overlapping gRNA library breakdown:")
-kable(bm_library %>%
-  group_by(library) %>%
-  summarise(Num_genes = length(unique(gene))) %>%
-  ungroup() %>%
-  arrange(desc(Num_genes))
-)
-
 bm_lib.hmap <- bm_library %>%
   select(library) %>%
   count_pairwise_lib_grnas()
 
-bm_lib.pct <- pct_shared_grnas(bm_lib.hmap)
+bm_lib.pct <- pct_shared_grnas(bm_lib.hmap %>%
+                                 filter(!between(row_number(),22,42)))
 
 ggplot(bm_lib.hmap, aes(Library_1, Library_2, fill = gRNA_count)) +
   geom_tile(color="white") +
   scale_fill_gradient(low = "palegoldenrod", high = "red") +
   ggtitle("gRNA sharing across libraries")
 
-ggplot(bm_lib.pct, aes(Library_1, gRNA_percent)) +
+ggplot(bm_lib.pct, aes(Library, gRNA_percent)) +
   geom_bar(stat="identity") +
-  facet_grid(~Library_2) +
+  facet_grid(~Lib, space="free_x", ) +
   theme(axis.text.x = element_text(angle = -30, hjust=0, size=7)) +
   ggtitle("Percent of shared gRNAs across libraries")
 
@@ -445,13 +447,36 @@ ggplot(bm_lib.pct, aes(Library_1, gRNA_percent)) +
 # Add 100 Control guides from Yusa v3
 
 ```{r}
+yusa.ctrl <- yusa.v3 %>%
+  filter(grepl("Control",gRNA_ID)) %>%
+  head(100) %>%
+  rename(gene = Gene, grna_id = gRNA_ID, sequence = Guide_sequence) %>%
+  mutate(library = "Control", strand = NA, target_exon = NA) %>%
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
+bm_library %<>%
+  rbind(yusa.ctrl)
 
 ```
 
 # Save
 
 ```{r}
+write.csv(bm_library, file = "../data/benchmark_library_FGC.csv", 
+          row.names = F, quote=F)
+```
+
+# Appendix
+
+```{r}
+cat("Full overlapping gRNA library breakdown:")
+kable(bm_library %>%
+  group_by(library) %>%
+  summarise(Num_genes = length(unique(gene))) %>%
+  ungroup() %>%
+  arrange(desc(Num_genes))
+)
 
 ```
+
 
