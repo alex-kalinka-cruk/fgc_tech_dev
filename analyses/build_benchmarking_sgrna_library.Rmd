@@ -274,14 +274,11 @@ length(setdiff(union(genes$Gene[genes$Neutral_Hart], genes$Gene[genes$bagel_none
 yusa <- yusa.v3 %>%
   filter(!grepl("Control",gRNA_ID)) %>%
   arrange(Gene,gRNA_ID) %>%
-  rename(gene = Gene) %>%
-  add_syms(gene_col = "gene") %>%
-  right_join(genes, by = "gene_symbol") %>%
-  mutate(library = "Yusa_v3", target_exon = NA, 
-         gene_symbol.fgc = genes$Gene[match(gene_symbol,genes$gene_symbol)]) %>%
-  rename(grna_id = gRNA_ID, gene_name.original = gene, strand = STRAND, sequence = Guide_sequence) %>%
+  filter(Gene %in% genes$Gene) %>%
+  mutate(library = "Yusa_v3", target_exon = NA) %>%
+  rename(grna_id = gRNA_ID, gene = Gene, strand = STRAND, sequence = Guide_sequence) %>%
   arrange(gene_symbol, grna_id) %>%
-  select(library, gene_name.original, gene_symbol.fgc, gene_symbol, grna_id, strand, target_exon, sequence)
+  select(library, gene, grna_id, strand, target_exon, sequence)
 
 brunello <- read.csv("../data/CRISPR_libraries/brunello_grnas.csv", stringsAsFactors = F) %>%
   arrange(Target.Gene.Symbol) %>%
@@ -334,11 +331,6 @@ gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsF
 ### Horizon
 
 ```{r}
-horizon <- rbind(read_horizon("~/data/az_cruk/GC-004650-E2 Edit-R crRNA POOL Human Drug Targets Lot 17162.csv"),
-                 read_horizon("~/data/az_cruk/GC-004675-E2 Edit-R crRNA POOL Human Druggable Subsets Lot 17163.csv"),
-                 read_horizon("~/data/az_cruk/GC-006500-E2 Edit-R crRNA POOL Human Genome  Lot 17155.csv")) %>%
-  right_join(genes, by = "gene_symbol")
-
 # Horizon gRNA library must be kept locally.
 horizon %<>%
   mutate(library = "Horizon", target_exon = NA, strand = substr(GenomicLocation,6,6),
@@ -395,8 +387,6 @@ bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon) %>%
   filter(!duplicated(sequence))
 
 ```
-
-
 
 # Library stats
 
