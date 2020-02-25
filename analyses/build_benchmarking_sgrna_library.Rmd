@@ -23,9 +23,10 @@ suppressMessages(library(tidyr))
 suppressMessages(library(magrittr))
 suppressMessages(library(ggplot2))
 suppressMessages(library(dplyr))
-suppressMessages(library(org.Hs.eg.db))
-suppressMessages(library(biomaRt))
-suppressMessages(library(Biostrings))
+suppressMessages(library(combinat))
+#suppressMessages(library(org.Hs.eg.db))
+#suppressMessages(library(biomaRt))
+#suppressMessages(library(Biostrings))
 
 
 filter <- dplyr::filter
@@ -357,14 +358,42 @@ bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon, croatan)
   mutate(seq_19 = ifelse(library!="Yusa_v3",substr(sequence,2,20),sequence)) %>%
   ungroup() %>%
   group_by(seq_19) %>%
-  mutate(library = ifelse(n() == 1, library, paste(unique(library),collapse="."))) %>%
+  mutate(library = ifelse(n() == 1, library, paste(sort(unique(library)),collapse=".")),
+         # Only keep one entry when there are duplicates.
+         keep = ifelse(n() > 1, c(T,rep(F,n()-1)),T)) %>%
   ungroup() %>%
-  filter(!duplicated(sequence)) %>%
-  select(-seq_19)
+  filter(keep & !duplicated(sequence)) %>%
+  select(-seq_19, -keep)
 
 ```
 
 # Library stats
+
+```{r}
+# To produce a heatmap of gRNA sharing across libraries.
+count_pairwise_lib_grnas <- function(data){
+  libs <- unique(unlist(sapply(data$library, function(x) unlist(strsplit(x,"\\.")))))
+  df <- as.data.frame(t(combn(libs, 2)), stringsAsFactors=F)
+  df2 <- data.frame(V1=df$V2, V2=df$V1, stringsAsFactors = F)
+  lc <- df %>%
+    rbind(df2) %>%
+    rbind(data.frame(V1=libs,V2=libs, stringsAsFactors = F)) %>%
+    rename(Library_1 = V1, Library_2 = V2) %>%
+    rowwise() %>%
+    mutate(gRNA_count = sum((grepl(Library_1, data$library) == T & grepl(Library_2, data$library) == T))) %>%
+    ungroup()
+  return(lc)
+}
+
+# Percentage of gRNAs shared across libraries.
+pct_shared_grnas <- function(data){
+  ret <- data %>%
+    group_by(Library_1) %>%
+    mutate(gRNA_percent = 100*gRNA_count/sum(gRNA_count)) %>%
+    ungroup()
+  return(ret)
+}
+```
 
 ```{r}
 cat("Total number of genes:")
@@ -386,7 +415,7 @@ kable(t(
 ))
 
 
-cat("Full overlapping library breakdown:")
+cat("Full overlapping gRNA library breakdown:")
 kable(bm_library %>%
   group_by(library) %>%
   summarise(Num_genes = length(unique(gene))) %>%
@@ -396,7 +425,20 @@ kable(bm_library %>%
 
 bm_lib.hmap <- bm_library %>%
   select(library) %>%
-  
+  count_pairwise_lib_grnas()
+
+bm_lib.pct <- pct_shared_grnas(bm_lib.hmap)
+
+ggplot(bm_lib.hmap, aes(Library_1, Library_2, fill = gRNA_count)) +
+  geom_tile(color="white") +
+  scale_fill_gradient(low = "palegoldenrod", high = "red") +
+  ggtitle("gRNA sharing across libraries")
+
+ggplot(bm_lib.pct, aes(Library_1, gRNA_percent)) +
+  geom_bar(stat="identity") +
+  facet_grid(~Library_2) +
+  theme(axis.text.x = element_text(angle = -30, hjust=0, size=7)) +
+  ggtitle("Percent of shared gRNAs across libraries")
 
 ```
 
