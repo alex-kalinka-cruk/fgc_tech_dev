@@ -20,6 +20,7 @@ params:
 # Setup
 
 ```{r setup}
+set.seed(1)
 options(warn=-1)
 suppressMessages(library(knitr))
 suppressMessages(library(tidyr))
@@ -30,13 +31,15 @@ suppressMessages(library(dplyr))
 suppressMessages(library(org.Hs.eg.db))
 suppressMessages(library(biomaRt))
 suppressMessages(library(Biostrings))
-suppressMessages(library(Rbowtie2))
 
 
 filter <- dplyr::filter
 select <- dplyr::select
 rename <- dplyr::rename
 arrange <- dplyr::arrange
+
+context_dep_genes <- c("TP53","MDM2","MDM4","PPM1D","KRAS","WRN","PIK3CA",
+                       "PARP1","PARP2","BCL2L1","MAP2K1","MAPK1")
 
 # hg38.
 ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
@@ -135,6 +138,7 @@ read_sam <- function(sam_out){
 
 ```
 
+# Input genes
 
 ```{r}
 load(file="../data/ess.genes.rda")
@@ -142,37 +146,120 @@ load(file="../data/ess.genes.rda")
 genes <- read.csv("../data/benchmarking_genes.csv", stringsAsFactors = F) %>%
   mutate_at(vars(-Gene), .funs = function(x) ifelse(x == "y",T,F)) %>%
   arrange(Gene) %>%
-  mutate(gene_symbol = get_standard_symbols(Gene),
-         pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
-         bagel_essential = Gene %in% ess.genes$bagel_essential,
-         bagel_nonessential = Gene %in% ess.genes$bagel_nonessential)
+  mutate(davids_list = T) %>%
+  rbind(data.frame(Gene = c(ess.genes$pan_cancer_Sanger, ess.genes$bagel_nonessential, context_dep_genes),
+                   stringsAsFactors = F) %>%
+          mutate(davids_list = F, Essential = Gene %in% ess.genes$pan_cancer_Sanger,
+                 Neutral_Hart = NA, Cluster = NA, Late_essential = NA,
+                 Mid_essential = NA, Early_essential = NA, PanCancer_essential = NA,
+                 Achilles_common_essentials = NA, Hart_core_essential_v2_2017 = NA)) %>%
+    filter(!duplicated(Gene)) %>%
+    mutate(pan_cancer = Gene %in% ess.genes$pan_cancer_Sanger,
+           bagel_essential = Gene %in% ess.genes$bagel_essential,
+           bagel_nonessential = Gene %in% ess.genes$bagel_nonessential,
+           context_dependent = Gene %in% context_dep_genes)
 
 
 load(file="../data/ess.genes.rda")
 yusa.v3 <- read.csv("../data/CRISPR_libraries/yusa_v3-suppl-table-S3.csv", stringsAsFactors = F) %>%
   left_join(read.table("../data/cleanr.tsv",header=T, stringsAsFactors = F), by = c("gRNA_ID" = "CODE"))
 
+read_horizon <- function(file){
+  ret <- read.csv(file, stringsAsFactors = F) %>%
+    arrange(GeneSymbol) %>%
+    add_syms(gene_col = "GeneSymbol")
+  return(ret)
+}
+
+horizon <- rbind(read_horizon("~/data/az_cruk/GC-004650-E2 Edit-R crRNA POOL Human Drug Targets Lot 17162.csv"),
+                 read_horizon("~/data/az_cruk/GC-004675-E2 Edit-R crRNA POOL Human Druggable Subsets Lot 17163.csv"),
+                 read_horizon("~/data/az_cruk/GC-006500-E2 Edit-R crRNA POOL Human Genome  Lot 17155.csv"))
+
+croatan.all <- read.table("../data/CRISPR_libraries/HG19_Library_For_Build.with_gene.txt",
+                      header=F, stringsAsFactors = F)
+croatan <- croatan.all %>%
+  select(-V3,-V4,-V5) %>%
+  rowwise() %>%
+  mutate(gRNA_sequence.1 = unlist(strsplit(V2,"__"))[2],
+         gRNA_sequence.2 = unlist(strsplit(V2,"__"))[6]) %>%
+  ungroup() %>%
+  select(-V2) %>%
+  gather(key = "guide_number", value = "context_sequence", -V1) %>%
+  rename(gene = V1) %>%
+  arrange(gene, guide_number, context_sequence) %>%
+  rowwise() %>%
+  mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27)) %>%
+  ungroup() %>%
+  arrange(gene)
+
 ```
 
-# Sanity checks on input genes
+## Genes common to all libraries
+
+```{r}
+add_library <- function(file, gene_col, data = NULL){
+  # Returns T or F for each gene's presence in 'genes'.
+  if(!is.null(file)){
+    lib <- read.csv(file, stringsAsFactors = F) 
+  }else{
+    lib <- data
+  }
+  lib %<>% mutate(gene = !!sym(gene_col))
+  ret <- genes$Gene %in% lib$gene
+  return(ret)
+}
+
+genes_common <- data.frame(gene = genes$Gene, stringsAsFactors = F) %>%
+  mutate(Yusa_v3 = add_library(file=NULL, gene_col="Gene", data=yusa.v3),
+         brunello = add_library("../data/CRISPR_libraries/brunello_grnas.csv","Target.Gene.Symbol"),
+         toronto = add_library("../data/CRISPR_libraries/toronto_grnas.csv","GENE"),
+         gecko = add_library("../data/CRISPR_libraries/gecko_grnas.csv","gene_id"),
+         gattinara = add_library("../data/CRISPR_libraries/gattinara_grnas.csv","Gene.Symbol"),
+         horizon = add_library(file=NULL,"GeneSymbol",data = horizon),
+         croatan = add_library(file=NULL,"gene",croatan)) %>%
+  mutate(common_count = rowSums(.[,2:ncol(.)]), common_all = common_count == ncol(.)-1)
+
+#  Curate input genes.
+# 1. All of David's genes that are common.
+# 2. Fill to 250 essential, 500 nonessential.
+genes %<>%
+  mutate(common_all = genes_common$common_all[match(Gene,genes_common$gene)],
+         keep = (davids_list & common_all),
+         keep = ifelse(!keep,context_dependent,keep)) %>%
+  filter(common_all)
+
+num_ess_miss <- 250 - table(genes$keep,genes$Essential)[2,2]
+num_noness_miss <- 500 - table(genes$keep,genes$Neutral_Hart)[2,2]
+
+extra_ess <- genes$Gene[(!genes$keep & genes$Essential)][1:num_ess_miss]
+extra_noness <- genes$Gene[(!genes$keep & !genes$Essential)][1:num_noness_miss]
+
+genes %<>%
+  mutate(keep = ifelse(!keep,Gene %in% c(extra_ess, extra_noness),keep)) %>%
+  filter(keep)
+
+```
+
+## Sanity checks on input genes
 
 ```{r}
 cat("Pan-cancer Sanger set comparison:")
 kable(table(genes$PanCancer_essential,genes$pan_cancer))
 
-cat("Pan Cancer essentials in Hart's Neutral gene list:")
-kable(
-  genes %>%
-    filter(PanCancer_essential == F & pan_cancer == T)
-)
+cat("Number of Essential genes:")
+sum(genes$Essential)
 
-cat("Expected numbers of essential groups:")
-cat("Early:")
-sum(genes$Early_essential) == params$early
-cat("Mid:")
-sum(genes$Mid_essential) == params$mid
-cat("Late:")
-sum(genes$Late_essential) == params$late
+cat("Early essential:")
+sum(genes$Early_essential)
+
+cat("Mid essential:")
+sum(genes$Mid_essential)
+
+cat("Late essential:")
+sum(genes$Late_essential)
+
+cat("Number of Non-essential genes (Hart neutral + bagel non-essential):")
+length(setdiff(union(genes$Gene[genes$Neutral_Hart], genes$Gene[genes$bagel_nonessential]),NA))
 
 ```
 
@@ -247,13 +334,6 @@ gattinara <- read.csv("../data/CRISPR_libraries/gattinara_grnas.csv", stringsAsF
 ### Horizon
 
 ```{r}
-read_horizon <- function(file){
-  ret <- read.csv(file, stringsAsFactors = F) %>%
-    arrange(GeneSymbol) %>%
-    add_syms(gene_col = "GeneSymbol")
-  return(ret)
-}
-
 horizon <- rbind(read_horizon("~/data/az_cruk/GC-004650-E2 Edit-R crRNA POOL Human Drug Targets Lot 17162.csv"),
                  read_horizon("~/data/az_cruk/GC-004675-E2 Edit-R crRNA POOL Human Druggable Subsets Lot 17163.csv"),
                  read_horizon("~/data/az_cruk/GC-006500-E2 Edit-R crRNA POOL Human Genome  Lot 17155.csv")) %>%
@@ -299,31 +379,6 @@ croatan <- croatan.all %>%
 
 ```
 
-```{r}
-# Handle the missing genes.
-missing.genes <- croatan$gene_symbol[is.na(croatan$sequence)]
-
-# Unspliced gene (ens99) and exon (ens75) narrows down the number of missing genes.
-miss_gene.grnas <- read_sam("../data/ens99-croatan-missing-genes-unspl-gene.sam") %>%
-  rbind(read_sam("../data/ens75-croatan-missing-genes-exon.sam")) %>%
-  filter(!duplicated(V10)) %>%
-  rename(sam_flag = V2, gene = V3, bowtie2_matches = V6, sequence = V10) %>%
-  arrange(gene) %>%
-  rowwise() %>%
-  mutate(in_prior_set = sequence %in% croatan$sequence) %>%
-  ungroup() %>%
-  mutate(other_gene = croatan$gene_symbol.fgc[match(sequence,croatan$sequence)],
-         gene_symbol.fgc = genes$gene[match(gene,genes$gene_symbol)])
-
-missing.genes.final <- genes$Gene[match(setdiff(missing.genes,miss_gene.grnas$gene),genes$gene_symbol)]
-
-cat("Multi-mapping gRNAs:")
-as.data.frame(table(miss_gene.grnas$gene, miss_gene.grnas$other_gene)) %>%
-  filter(Freq>0)
-
-# Update croatan set.
-
-```
 
 ### Final
 
@@ -341,12 +396,6 @@ bm_library <- rbind(yusa, brunello, toronto, gecko, gattinara, horizon) %>%
 
 ```
 
-## Find missing genes using gRNA sequences
-
-```{r}
-
-
-```
 
 
 # Library stats
