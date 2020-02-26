@@ -24,6 +24,7 @@ suppressMessages(library(magrittr))
 suppressMessages(library(ggplot2))
 suppressMessages(library(dplyr))
 suppressMessages(library(combinat))
+suppressMessages(library(ggdendro))
 #suppressMessages(library(org.Hs.eg.db))
 #suppressMessages(library(biomaRt))
 #suppressMessages(library(Biostrings))
@@ -198,6 +199,9 @@ croatan <- croatan.all %>%
   mutate(sequence = substr(context_sequence,5,24), PAM = substr(context_sequence,25,27)) %>%
   ungroup() %>%
   arrange(gene)
+
+# Additional 5' and 3' sequence for common vector.
+common_seq.vector <- read.csv("../data/oligo-design-template-CRISPR-benchmarking.csv", stringsAsFactors = F)
 
 ```
 
@@ -403,14 +407,33 @@ pct_shared_grnas <- function(data){
   }
   return(ret)
 }
+
+# Distance matrix for hclust.
+make_library_dist <- function(data){
+  data %<>%
+    spread(Library_2, gRNA_count)
+  rn <- data$Library_1
+  cn <- colnames(data)[2:ncol(data)]
+  data <- as.matrix(data[,2:ncol(data)])
+  rownames(data) <- rn
+  colnames(data) <- cn
+  data <- 1-data/rowSums(data)
+  return(data)
+}
 ```
 
 ```{r}
+cat("Total number of gRNAs:")
+nrow(bm_library)
+
 cat("Total number of genes:")
 length(unique(bm_library$gene))
 
 cat("All genes in original set:")
 all(unique(bm_library$gene) %in% genes$Gene)
+
+cat("Duplicate gRNA count:")
+sum(duplicated(bm_library$sequence))
 
 cat("Total genes per library:")
 kable(t(
@@ -431,6 +454,19 @@ bm_lib.hmap <- bm_library %>%
 bm_lib.pct <- pct_shared_grnas(bm_lib.hmap %>%
                                  filter(!between(row_number(),22,42)))
 
+dist.bm_lib <- make_library_dist(bm_lib.hmap)
+hcl.bm_lib <- hclust(as.dist(dist.bm_lib), method="ward.D2")
+
+num_grnas_per_gene <- bm_library %>%
+  group_by(gene) %>%
+  summarise(num_grnas = n()) %>%
+  ungroup()
+
+# Plots.
+ggplot(num_grnas_per_gene, aes(num_grnas)) +
+  geom_bar() +
+  ggtitle("Number of gRNAs per gene")
+
 ggplot(bm_lib.hmap, aes(Library_1, Library_2, fill = gRNA_count)) +
   geom_tile(color="white") +
   scale_fill_gradient(low = "palegoldenrod", high = "red") +
@@ -441,6 +477,12 @@ ggplot(bm_lib.pct, aes(Library, gRNA_percent)) +
   facet_grid(~Lib, space="free_x", ) +
   theme(axis.text.x = element_text(angle = -30, hjust=0, size=7)) +
   ggtitle("Percent of shared gRNAs across libraries")
+
+ggdendrogram(hcl.bm_lib, size=5,theme_dendro=F) + 
+  theme(axis.text.x = element_text(angle=-30,hjust=0,size=10)) + 
+  xlab("") + 
+  ylab("Distance (Ward D^2)") + 
+  ggtitle("gRNA Library dendrogram")
 
 ```
 
@@ -455,7 +497,11 @@ yusa.ctrl <- yusa.v3 %>%
   select(library, gene, grna_id, strand, target_exon, sequence)
 
 bm_library %<>%
-  rbind(yusa.ctrl)
+  rbind(yusa.ctrl) %>%
+  # Add common vector 5' and 3' vector sequence.
+  mutate(sequence_to_order = paste(common_seq.vector$upstream.sequence.5prime, sequence,
+                                   common_seq.vector$downstream.sequence.3prime, sep="")) %>%
+  arrange(gene, library)
 
 ```
 
