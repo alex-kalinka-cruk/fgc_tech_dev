@@ -251,6 +251,13 @@ genes %<>%
 
 ```
 
+```{r}
+# Save input gene set.
+write.csv(genes %>%
+            select(-Cluster), 
+          file = "../data/benchmarking_input_genes.csv", quote=F, row.names = F)
+```
+
 ## Sanity checks on input genes
 
 ```{r}
