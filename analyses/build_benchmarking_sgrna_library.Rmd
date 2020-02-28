@@ -200,6 +200,10 @@ croatan <- croatan.all %>%
   ungroup() %>%
   arrange(gene)
 
+# Sanity check Croatan PAM sequences.
+cat("All Croatan PAM sequences end in 'GG':")
+all(unlist(sapply(croatan$PAM, function(x) gsub("^.(..)$","\\1",x))) == "GG")
+
 # Additional 5' and 3' sequence for common vector.
 common_seq.vector <- read.csv("../data/oligo-design-template-CRISPR-benchmarking.csv", stringsAsFactors = F)
 
