@@ -1,0 +1,76 @@
+---
+title: "Base Editing KO analysis"
+author: "Alex Kalinka"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    depth: 3
+    highlight: tango
+    number_sections: true
+    theme: spacelab
+    toc: true
+    toc_float: true
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+set.seed(1)
+
+options(warn=-1)
+suppressMessages(library(knitr))
+suppressMessages(library(tidyr))
+suppressMessages(library(magrittr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dplyr))
+suppressMessages(library(fgcQC))
+
+select <- dplyr::select
+filter <- dplyr::filter
+rename <- dplyr::rename
+
+lib <- read.csv("~/data/az_cruk/Base_Editing/expt_1/BE-gRNA-properties-summary.csv",
+                      header=T,stringsAsFactors = F,check.names = F)
+counts <- read.csv("~/data/az_cruk/Base_Editing/expt_1/BE_library_summary--GuideStats_R1.csv",
+                     header=T,stringsAsFactors = F,check.names = F) %>%
+  rowwise() %>%
+  mutate(Guide_clip_1 = substr(Guide,2,20),
+         Guide_clip_2 = substr(Guide,2,19)) %>%
+  ungroup %>%
+  mutate(sgRNA = paste(Symbol,1:n(),sep="-"))
+lib %<>%
+  rowwise() %>%
+  mutate(Guide_clip_1 = substr(Guide,1,19),
+         Guide_clip_2 = substr(Guide,2,19)) %>%
+  ungroup %>%
+  mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+counts %<>%
+  select(-Guide,-Guide_clip_1,-Guide_clip_2,-contains("1st-transd")) %>%
+  select(sgRNA,everything()) %>%
+  rename(gene = Symbol)
+
+# Normalize raw counts for gRNAs (Read 1).
+counts.norm <- normalize_library_depth_relative(counts,2e7)
+
+```
+
+# Log-fold changes
+
+```{r}
+lfc.ctrl_pl.293.day_6 <- calc_log2_fold_change_gRNAs(counts.norm,"BE-plasmid-lib",c("293-1-d6pt","293-2-d6pt")) %>%
+  mutate(base_edit = lib$PropChange[match(sgRNA, lib$sgRNA)],
+         cell_line = "293", time = "Day_6")
+
+lfc.ctrl_pl.293.day_6 %>%
+  filter(base_edit %in% c("splice_loss","start_loss","stop_gain") &
+           gene %in% crispr_gene_sets$essential$hart_essential) %>%
+  ggplot(aes(base_edit, log2FC, color=base_edit)) +
+  geom_point() +
+  geom_boxplot()
+
+```
+
+
