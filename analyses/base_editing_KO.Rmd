@@ -30,8 +30,14 @@ select <- dplyr::select
 filter <- dplyr::filter
 rename <- dplyr::rename
 
+# Percent of expected base edits per guide.
+perc_exp_edits <- read.csv("~/data/az_cruk/Base_Editing/expt_1/guide_KO_percentages.csv",
+                           header=T,stringsAsFactors = F,check.names = F)
+
+# gRNA library stats.
 lib <- read.csv("~/data/az_cruk/Base_Editing/expt_1/BE-gRNA-properties-summary.csv",
                       header=T,stringsAsFactors = F,check.names = F)
+# Raw counts for gRNAs.
 counts <- read.csv("~/data/az_cruk/Base_Editing/expt_1/BE_library_summary--GuideStats_R1.csv",
                      header=T,stringsAsFactors = F,check.names = F) %>%
   rowwise() %>%
@@ -47,6 +53,15 @@ lib %<>%
   mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+perc_exp_edits %<>%
+  rowwise() %>%
+  mutate(Guide_clip_1 = substr(Guide,1,19),
+         Guide_clip_2 = substr(Guide,2,19)) %>%
+  ungroup %>%
+  mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+# Format counts for 'fgcQC' functions.
 counts %<>%
   select(-Guide,-Guide_clip_1,-Guide_clip_2,-contains("1st-transd")) %>%
   select(sgRNA,everything()) %>%
@@ -59,18 +74,202 @@ counts.norm <- normalize_library_depth_relative(counts,2e7)
 
 # Log-fold changes
 
+## gRNA level
+
 ```{r}
 lfc.ctrl_pl.293.day_6 <- calc_log2_fold_change_gRNAs(counts.norm,"BE-plasmid-lib",c("293-1-d6pt","293-2-d6pt")) %>%
   mutate(base_edit = lib$PropChange[match(sgRNA, lib$sgRNA)],
-         cell_line = "293", time = "Day_6")
+         gene_group = lib$group[match(sgRNA, lib$sgRNA)],
+         PercentTranscriptsHit = lib$PercentTranscriptsHit[match(sgRNA, lib$sgRNA)],
+         cell_line = "PC9", time = "Day_14",
+         essential_group = case_when(gene %in% crispr_gene_sets$essential$pan_cancer_Sanger ~ "pan_cancer_Sanger",
+                                     gene %in% crispr_gene_sets$essential$hart_essential ~ "Hart_essential",
+                                     gene %in% crispr_gene_sets$essential$hart_nonessential ~ "Hart_nonessential",
+                                     gene %in% crispr_gene_sets$essential$moderately_negative ~ "moderately_negative",
+                                     gene %in% crispr_gene_sets$essential$weakly_negative ~ "weakly_negative",
+                                     TRUE ~ "Other"))
 
+lfc.ctrl_pl.293.day_14 <- calc_log2_fold_change_gRNAs(counts.norm,"BE-plasmid-lib",c("293-1-d14pt","293-2-d14pt")) %>%
+  mutate(base_edit = lib$PropChange[match(sgRNA, lib$sgRNA)],
+         gene_group = lib$group[match(sgRNA, lib$sgRNA)],
+         PercentTranscriptsHit = lib$PercentTranscriptsHit[match(sgRNA, lib$sgRNA)],
+         cell_line = "PC9", time = "Day_14",
+         essential_group = case_when(gene %in% crispr_gene_sets$essential$pan_cancer_Sanger ~ "pan_cancer_Sanger",
+                                     gene %in% crispr_gene_sets$essential$hart_essential ~ "Hart_essential",
+                                     gene %in% crispr_gene_sets$essential$hart_nonessential ~ "Hart_nonessential",
+                                     gene %in% crispr_gene_sets$essential$moderately_negative ~ "moderately_negative",
+                                     gene %in% crispr_gene_sets$essential$weakly_negative ~ "weakly_negative",
+                                     TRUE ~ "Other"))
+
+lfc.ctrl_pl.PC9.day_6 <- calc_log2_fold_change_gRNAs(counts.norm,"BE-plasmid-lib",c("PC9-1-d6pt","PC9-2-d6pt")) %>%
+  mutate(base_edit = lib$PropChange[match(sgRNA, lib$sgRNA)],
+         gene_group = lib$group[match(sgRNA, lib$sgRNA)],
+         PercentTranscriptsHit = lib$PercentTranscriptsHit[match(sgRNA, lib$sgRNA)],
+         cell_line = "PC9", time = "Day_14",
+         essential_group = case_when(gene %in% crispr_gene_sets$essential$pan_cancer_Sanger ~ "pan_cancer_Sanger",
+                                     gene %in% crispr_gene_sets$essential$hart_essential ~ "Hart_essential",
+                                     gene %in% crispr_gene_sets$essential$hart_nonessential ~ "Hart_nonessential",
+                                     gene %in% crispr_gene_sets$essential$moderately_negative ~ "moderately_negative",
+                                     gene %in% crispr_gene_sets$essential$weakly_negative ~ "weakly_negative",
+                                     TRUE ~ "Other"))
+
+lfc.ctrl_pl.PC9.day_14 <- calc_log2_fold_change_gRNAs(counts.norm,"BE-plasmid-lib",c("PC9-1-d14pt","PC9-2-d14pt")) %>%
+  mutate(base_edit = lib$PropChange[match(sgRNA, lib$sgRNA)],
+         gene_group = lib$group[match(sgRNA, lib$sgRNA)],
+         PercentTranscriptsHit = lib$PercentTranscriptsHit[match(sgRNA, lib$sgRNA)],
+         cell_line = "PC9", time = "Day_14",
+         essential_group = case_when(gene %in% crispr_gene_sets$essential$pan_cancer_Sanger ~ "pan_cancer_Sanger",
+                                     gene %in% crispr_gene_sets$essential$hart_essential ~ "Hart_essential",
+                                     gene %in% crispr_gene_sets$essential$hart_nonessential ~ "Hart_nonessential",
+                                     gene %in% crispr_gene_sets$essential$moderately_negative ~ "moderately_negative",
+                                     gene %in% crispr_gene_sets$essential$weakly_negative ~ "weakly_negative",
+                                     TRUE ~ "Other"))
+
+# Plots.
 lfc.ctrl_pl.293.day_6 %>%
-  filter(base_edit %in% c("splice_loss","start_loss","stop_gain") &
-           gene %in% crispr_gene_sets$essential$hart_essential) %>%
-  ggplot(aes(base_edit, log2FC, color=base_edit)) +
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group, log2FC, color=gene_group)) +
   geom_point() +
-  geom_boxplot()
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: 293, Day 6")
+
+lfc.ctrl_pl.293.day_14 %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group, log2FC, color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: 293, Day 14")
+
+lfc.ctrl_pl.PC9.day_6 %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group, log2FC, color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: PC9, Day 6")
+
+lfc.ctrl_pl.PC9.day_14 %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group, log2FC, color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: PC9, Day 14")
+
+lfc.ctrl_pl.PC9.day_14 %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(essential_group, log2FC, color=essential_group)) +
+  geom_point() +
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: PC9, Day 14")
 
 ```
+
+## Gene level
+
+```{r}
+lfc.ctrl_pl.293.day_6.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.293.day_6) %>%
+  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
+
+lfc.ctrl_pl.293.day_14.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.293.day_14) %>%
+  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
+
+lfc.ctrl_pl.PC9.day_6.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.PC9.day_6) %>%
+  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
+
+lfc.ctrl_pl.PC9.day_14.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.PC9.day_14) %>%
+  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
+
+# Plots.
+lfc.ctrl_pl.293.day_6.genes %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: 293, Day 6")
+
+lfc.ctrl_pl.293.day_14.genes %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: 293, Day 14")
+
+lfc.ctrl_pl.PC9.day_6.genes %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: PC9, Day 6")
+
+lfc.ctrl_pl.PC9.day_14.genes %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
+  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid: PC9, Day 14")
+
+```
+
+## Percent of expected KO base edits
+
+```{r}
+lfc.ctrl_pl.293.day_14 %<>%
+  left_join(perc_exp_edits, by = "sgRNA") %>%
+  rowwise() %>%
+  mutate(gRNA_percent_expected_edits.repl_median = median(c(`293-1-d14pt.y`,`293-2-d14pt.y`))) %>%
+  ungroup
+
+lfc.ctrl_pl.293.day_14 %>%
+  filter(!is.na(gene_group)) %>%
+  ggplot(aes(gRNA_percent_expected_edits.repl_median,log2FC)) +
+  geom_hex() +
+  geom_smooth() +
+  facet_grid(~gene_group) +
+  ggtitle("293 Day 14: logFC vs percent expected gRNA edits")
+
+# Plots.
+lfc.ctrl_pl.293.day_14 %>%
+  filter(!is.na(gene_group)) %>%
+  ggplot(aes(gRNA_percent_expected_edits.repl_median,fill=gene_group)) +
+  geom_density(alpha=0.25) +
+  facet_grid(~gene_group) +
+  ggtitle("293 Day 14: Percent expected gRNA edits")
+
+lfc.ctrl_pl.293.day_14 %>%
+  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss") &
+           gRNA_percent_expected_edits.repl_median >=45) %>%
+  ggplot(aes(gene_group, log2FC, color=gene_group)) +
+  geom_point() +
+  geom_boxplot() +
+  facet_grid(~base_edit) +
+  geom_hline(yintercept = 0,linetype="dashed") +
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
+  ggtitle("logFC Control vs plasmid (>=45% expected base edits): 293, Day 14")
+
+
+```
+
 
 
