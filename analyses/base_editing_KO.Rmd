@@ -33,6 +33,10 @@ rename <- dplyr::rename
 # Percent of expected base edits per guide.
 perc_exp_edits <- read.csv("~/data/az_cruk/Base_Editing/expt_1/guide_KO_percentages.csv",
                            header=T,stringsAsFactors = F,check.names = F)
+perc_one_ct <- read.csv("~/data/az_cruk/Base_Editing/expt_1/percent_edits_CT_conversion.csv",
+                        header=T,stringsAsFactors = F,check.names = F)
+perc_c_BEwin <- read.csv("~/data/az_cruk/Base_Editing/expt_1/percent_edited_C_BEwindow.csv",
+                        header=T,stringsAsFactors = F,check.names = F)
 
 # gRNA library stats.
 lib <- read.csv("~/data/az_cruk/Base_Editing/expt_1/BE-gRNA-properties-summary.csv",
@@ -53,6 +57,7 @@ lib %<>%
   mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+# Percent of expected edits.
 perc_exp_edits %<>%
   rowwise() %>%
   mutate(Guide_clip_1 = substr(Guide,1,19),
@@ -61,6 +66,25 @@ perc_exp_edits %<>%
   mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
          sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+# Percent edits with at least one C->T conversion.
+perc_one_ct %<>%
+  rowwise() %>%
+  mutate(Guide_clip_1 = substr(Guide,1,19),
+         Guide_clip_2 = substr(Guide,2,19)) %>%
+  ungroup %>%
+  mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+# Percent of edited Cs in BE window.
+perc_c_BEwin %<>%
+  rowwise() %>%
+  mutate(Guide_clip_1 = substr(Guide,1,19),
+         Guide_clip_2 = substr(Guide,2,19)) %>%
+  ungroup %>%
+  mutate(sgRNA = counts$sgRNA[match(Guide_clip_1, counts$Guide_clip_1)],
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide_clip_2, counts$Guide_clip_2)], sgRNA),
+         sgRNA = ifelse(is.na(sgRNA), counts$sgRNA[match(Guide, counts$Guide)], sgRNA))
+
 # Format counts for 'fgcQC' functions.
 counts %<>%
   select(-Guide,-Guide_clip_1,-Guide_clip_2,-contains("1st-transd")) %>%
@@ -178,70 +202,18 @@ lfc.ctrl_pl.PC9.day_14 %>%
 
 ```
 
-## Gene level
-
-```{r}
-lfc.ctrl_pl.293.day_6.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.293.day_6) %>%
-  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
-
-lfc.ctrl_pl.293.day_14.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.293.day_14) %>%
-  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
-
-lfc.ctrl_pl.PC9.day_6.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.PC9.day_6) %>%
-  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
-
-lfc.ctrl_pl.PC9.day_14.genes <- calc_log2_fold_change_genes(lfc.ctrl_pl.PC9.day_14) %>%
-  mutate(gene_group=lib$group[match(gene,lib$GeneName)])
-
-# Plots.
-lfc.ctrl_pl.293.day_6.genes %>%
-  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
-  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
-  geom_point() +
-  geom_boxplot() +
-  geom_hline(yintercept = 0,linetype="dashed") +
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
-  ggtitle("logFC Control vs plasmid: 293, Day 6")
-
-lfc.ctrl_pl.293.day_14.genes %>%
-  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
-  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
-  geom_point() +
-  geom_boxplot() +
-  geom_hline(yintercept = 0,linetype="dashed") +
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
-  ggtitle("logFC Control vs plasmid: 293, Day 14")
-
-lfc.ctrl_pl.PC9.day_6.genes %>%
-  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
-  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
-  geom_point() +
-  geom_boxplot() +
-  geom_hline(yintercept = 0,linetype="dashed") +
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
-  ggtitle("logFC Control vs plasmid: PC9, Day 6")
-
-lfc.ctrl_pl.PC9.day_14.genes %>%
-  filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss")) %>%
-  ggplot(aes(gene_group,log2FC_gene,color=gene_group)) +
-  geom_point() +
-  geom_boxplot() +
-  geom_hline(yintercept = 0,linetype="dashed") +
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) +
-  ggtitle("logFC Control vs plasmid: PC9, Day 14")
-
-```
 
 ## Percent of expected KO base edits
 
 ```{r}
-lfc.ctrl_pl.293.day_14 %<>%
+pexp <- lfc.ctrl_pl.293.day_14 %>%
   left_join(perc_exp_edits, by = "sgRNA") %>%
   rowwise() %>%
   mutate(gRNA_percent_expected_edits.repl_median = median(c(`293-1-d14pt.y`,`293-2-d14pt.y`))) %>%
   ungroup
 
-lfc.ctrl_pl.293.day_14 %>%
+# Plots.
+pexp %>%
   filter(!is.na(gene_group)) %>%
   ggplot(aes(gRNA_percent_expected_edits.repl_median,log2FC)) +
   geom_hex() +
@@ -249,15 +221,14 @@ lfc.ctrl_pl.293.day_14 %>%
   facet_grid(~gene_group) +
   ggtitle("293 Day 14: logFC vs percent expected gRNA edits")
 
-# Plots.
-lfc.ctrl_pl.293.day_14 %>%
+pexp %>%
   filter(!is.na(gene_group)) %>%
   ggplot(aes(gRNA_percent_expected_edits.repl_median,fill=gene_group)) +
   geom_density(alpha=0.25) +
   facet_grid(~gene_group) +
   ggtitle("293 Day 14: Percent expected gRNA edits")
 
-lfc.ctrl_pl.293.day_14 %>%
+pexp %>%
   filter(base_edit%in%c("splice_loss","start_loss","stop_gain","stop_gain, splice_loss","start_loss, splice_loss") &
            gRNA_percent_expected_edits.repl_median >=45) %>%
   ggplot(aes(gene_group, log2FC, color=gene_group)) +
@@ -271,5 +242,44 @@ lfc.ctrl_pl.293.day_14 %>%
 
 ```
 
+## Percent at least one C->T conversion
+
+```{r}
+pconv <- lfc.ctrl_pl.293.day_14 %>%
+  left_join(perc_one_ct, by = "sgRNA") %>%
+  rowwise() %>%
+  mutate(gRNA_percent_one_C_to_T_conversion.repl_median = median(c(`293-1-d14pt.y`,`293-2-d14pt.y`))) %>%
+  ungroup
+
+# Plots.
+pconv %>%
+  filter(!is.na(gene_group)) %>%
+  ggplot(aes(gRNA_percent_one_C_to_T_conversion.repl_median,log2FC)) +
+  geom_hex() +
+  geom_smooth() +
+  facet_grid(~gene_group) +
+  ggtitle("293 Day 14: logFC vs percent guides with at least one C->T conversion")
+
+```
+
+## Percent edited C's in BE window
+
+```{r}
+pwin <- lfc.ctrl_pl.293.day_14 %>%
+  left_join(perc_c_BEwin, by = "sgRNA") %>%
+  rowwise() %>%
+  mutate(gRNA_percent_edited_C_BE_window.repl_median = median(c(`293-1-d14pt.y`,`293-2-d14pt.y`))) %>%
+  ungroup
+
+# Plots.
+pwin %>%
+  filter(!is.na(gene_group)) %>%
+  ggplot(aes(gRNA_percent_edited_C_BE_window.repl_median,log2FC)) +
+  geom_hex() +
+  geom_smooth() +
+  facet_grid(~gene_group) +
+  ggtitle("293 Day 14: logFC vs percent edited Cs within BE window")
+
+```
 
 
