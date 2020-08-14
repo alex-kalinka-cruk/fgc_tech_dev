@@ -1,0 +1,70 @@
+---
+title: 'Overlap of new library with Benchmark library'
+author: "Alex Kalinka"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    depth: 3
+    highlight: tango
+    number_sections: true
+    theme: spacelab
+    toc: true
+    toc_float: true
+---
+
+# Setup
+
+```{r,echo=F}
+options(warn=-1)
+
+suppressMessages(library(knitr))
+suppressMessages(library(tidyr))
+suppressMessages(library(magrittr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dplyr))
+
+
+filter <- dplyr::filter
+select <- dplyr::select
+rename <- dplyr::rename
+mutate <- dplyr::mutate
+
+
+nlib <- read.delim("../data/hg38_top6_sgRNAs.txt", stringsAsFactors = F) %>%
+  rowwise() %>%
+  mutate(seq_19 = ifelse(nchar(sgRNA)>19,substr(sgRNA,2,20),sgRNA)) %>%
+  ungroup
+
+bm <- read.csv("../data/benchmark_library_FGC.csv", stringsAsFactors = F) %>%
+  rowwise() %>%
+  mutate(seq_19 = ifelse(nchar(sequence)>19,substr(sequence,2,nchar(sequence)),sequence)) %>%
+  ungroup %>%
+  left_join(nlib, by = "seq_19")
+
+
+```
+
+# Overlap
+
+```{r}
+bm %>%
+  summarise(sgRNA_overlap_count = sum(!is.na(sgRNA)),
+            percent_overlap.relative_to_benchmark_lib = 100*sgRNA_overlap_count/n(),
+            percent_overlap.relative_to_novel_lib = 100*sgRNA_overlap_count/length(unique(nlib$sgRNA))) %>%
+  kable
+
+```
+
+# Same gene targets, not in Benchmark library
+
+```{r}
+glib <- nlib %>%
+  filter(gene %in% bm$gene.x) %>%
+  anti_join(bm, by = "seq_19")
+
+```
+
+
+
+
