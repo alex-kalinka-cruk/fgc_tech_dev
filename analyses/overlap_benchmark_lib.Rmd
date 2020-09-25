@@ -36,7 +36,9 @@ nlib <- read.delim("../data/hg38_top6_sgRNAs.txt", stringsAsFactors = F) %>%
   mutate(seq_19 = ifelse(nchar(sgRNA)>19,substr(sgRNA,2,20),sgRNA)) %>%
   ungroup
 
-bm <- read.csv("../data/benchmark_library_FGC.csv", stringsAsFactors = F) %>%
+bm.old <- read.csv("../data/benchmark_library_FGC.csv", stringsAsFactors = F)
+
+bm <- bm.old %>%
   rowwise() %>%
   mutate(seq_19 = ifelse(nchar(sequence)>19,substr(sequence,2,nchar(sequence)),sequence)) %>%
   ungroup %>%
@@ -61,7 +63,25 @@ bm %>%
 ```{r}
 glib <- nlib %>%
   filter(gene %in% bm$gene.x) %>%
-  anti_join(bm, by = "seq_19")
+  anti_join(bm, by = "seq_19") %>%
+  filter(!duplicated(sgRNA)) %>%
+  rowwise() %>%
+  mutate(seq_no_pam = gsub("^(.*?)...$","\\1",sgRNA)) %>%
+  ungroup
+  
+
+# Add to existing BM library.
+bm.new <- rbind(bm.old,
+                data.frame(library = "VBC", gene = glib$gene, grna_id = paste("VBC",1:nrow(glib),sep="."),
+                           strand = NA, target_exon = NA, sequence = glib$seq_no_pam,
+                           sequence_to_order = NA)) %>%
+  rowwise() %>%
+  mutate(sequence_to_order = ifelse(library == "VBC", paste("tatatatcttgtggaaaggacgaaacaccg", sequence, "gtttaagagctatgctggaaacagc",
+                                                            sep = ""), sequence_to_order)) %>%
+  ungroup
+
+vbc <- bm.new %>%
+  filter(library == "VBC")
 
 ```
 

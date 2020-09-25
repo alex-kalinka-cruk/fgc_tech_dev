@@ -1,0 +1,79 @@
+---
+title: 'Plasmid sample QC'
+author: "Alex Kalinka"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    depth: 3
+    highlight: tango
+    number_sections: true
+    theme: spacelab
+    toc: true
+    toc_float: true
+---
+
+# Setup
+
+```{r}
+options(warn=-1)
+
+suppressMessages(library(crispRutils))
+suppressMessages(library(dplyr))
+suppressMessages(library(ggplot2))
+
+pl_counts <- crispRutils::read_plasmid_samples("../data/plasmid-samples") %>%
+  dplyr::mutate(batch = ifelse(grepl("FGC",batch),"FGC",batch))
+qc_pl <- crispRutils::qc_plasmid_samples(pl_counts)
+
+```
+
+
+# Library width
+
+```{r}
+qc_pl %>%
+  ggplot(aes(library, Library_width, fill=library)) +
+  geom_bar(stat="identity") +
+  facet_grid(~batch, space="free_x", scale="free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Plasmid Library Width")
+
+```
+
+# GC Bias: GC content vs counts
+
+```{r}
+qc_pl %>%
+  ggplot(aes(library, distcorr_GC_content_counts, fill=library)) +
+  geom_bar(stat="identity") +
+  facet_grid(~batch, space="free_x", scale="free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Plasmid GC Bias")
+
+# Yusa v2 mouse:
+pl_counts %>%
+  dplyr::filter(library=="Yusa-v2-mouse") %>%
+  ggplot(aes(GC_percent,count,group=GC_percent)) +
+  geom_point() +
+  geom_boxplot(notch=T) +
+  ggtitle("Yusa v2 mouse plasmid: GC bias for counts")
+
+```
+
+# Low count guides
+
+```{r}
+qc_pl %>%
+  ggplot(aes(library, percent_less_30_count_guides, fill=library)) +
+  geom_bar(stat="identity") +
+  facet_grid(~batch, space="free_x", scale="free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Plasmid Low-count guides")
+
+```
+
+
