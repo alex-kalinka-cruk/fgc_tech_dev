@@ -42,6 +42,27 @@ qc_pl %>%
 
 ```
 
+# CV
+
+```{r}
+qc_pl %>%
+  ggplot(aes(library, Coeff_Var_counts, fill=library)) +
+  geom_bar(stat="identity") +
+  facet_grid(~batch, space="free_x", scale="free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Plasmid Coefficient of Variation")
+
+qc_pl %>%
+  ggplot(aes(library, Coeff_Var_counts.robust, fill=library)) +
+  geom_bar(stat="identity") +
+  facet_grid(~batch, space="free_x", scale="free_x") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  ggtitle("Plasmid Robust Coefficient of Variation")
+
+```
+
 # GC Bias: GC content vs counts
 
 ```{r}
